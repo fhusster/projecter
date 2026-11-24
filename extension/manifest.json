@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Projecter",
+  "version": "1.1.1",
+  "description": "Send the video on any web page to your TVs (Sanyo, Roku) through Projecter.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxP8/N7MKXrNXh50RUtDr/Lc33VDKM4hCQPogcd03ac97qWQxue4H09MFUGkphgZ4pc1rbgMvMWNc+FdMz4p2PbgBRn3mJPKb2uN4YHnaUdjGyaiuacUEZqw5fCxzd5EQrhySsOQfZ2EufTTijl9VFh8uCLp6zAuPczb57ywIqZs/r/Nc1mxnixQmvAAoLJlxaBI25eFEh5r7M+6zqtNa8Mzly1mv4lsJEEw6IwI9oxiPWboemrpBaEx0OLvwkpB4B9gdbrh0Wswj+fDrr6vGOzYd8oNLsNFzvu7Ubr2bHEBzeMOc65VbwH7qSX5vgl+W+iZXUk2zrdWJ+pCxd5ONvwIDAQAB",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Projecter",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "webRequest",
+    "storage",
+    "contextMenus",
+    "nativeMessaging",
+    "cookies",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}
