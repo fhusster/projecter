@@ -767,14 +767,20 @@ def fetch_subtitle(sub, folder):
 
 
 CUE_CACHE = {}
+CUE_LOCK = threading.Lock()
 TAG_RE = re.compile(r"<[^>]+>|\{\\[^}]*\}")
 
 
 def load_cues(sub):
     """A subtitle track as a sorted list of [start, end, text] (for the Roku channel)."""
     ident = sub.get("url") or hashlib.md5((sub.get("text") or "").encode()).hexdigest()
-    if ident in CUE_CACHE:
+    with CUE_LOCK:   # a background prefetch and a click may want the same track
+        if ident not in CUE_CACHE:
+            CUE_CACHE[ident] = _read_cues(sub, ident)
         return CUE_CACHE[ident]
+
+
+def _read_cues(sub, ident):
     folder = os.path.join(WORK, "subs", hashlib.md5(ident.encode()).hexdigest()[:10])
     os.makedirs(folder, exist_ok=True)
     raw = fetch_subtitle(sub, folder)
@@ -788,7 +794,6 @@ def load_cues(sub):
     cues = [c for c in cues if c[2]]
     if not cues:
         raise RuntimeError("no subtitle lines found in it")
-    CUE_CACHE[ident] = cues
     return cues
 
 
@@ -898,8 +903,8 @@ class Device:
               if self.session and m["duration"] else (1.0 if self.mode == "youtube" else 0),
               # subtitles can be switched when the video goes through the laptop
               "subtitles": [s.get("label") or s.get("lang") or f"Track {i + 1}" for i, s in enumerate(m.get("subtitles") or [])],
-              "sub": m.get("sub", -1) if self.session and self.session.sub_file else -1,
-              "subs_ok": self.mode in ("file", "hls") and not m["is_live"],
+              "sub": m.get("sub", -1) if (self.session and self.session.sub_file) or self.mode == "channel" else -1,
+              "subs_ok": self.mode in ("file", "hls", "channel") and not m["is_live"],
               "sub_style": dict(SUB_STYLE, **(m.get("sub_style") or {}))}
         if self.session and self.session.sub_error:
             st["notice"] = self.session.sub_error
@@ -1335,6 +1340,17 @@ class RokuDevice(Device):
         self.set_playing(media, s, "channel", s.segs[k][0])
         self.ecp_call(f"/launch/{ROKU_CHANNEL}?{urllib.parse.urlencode(p)}")
         self.cast_time = time.time()
+        # Fetch every subtitle track now, so turning one on later is instant
+        threading.Thread(target=self.prefetch_cues, args=(list(media.get("subtitles") or []),),
+                         daemon=True).start()
+
+    @staticmethod
+    def prefetch_cues(tracks):
+        for sub in tracks:
+            try:
+                load_cues(sub)
+            except Exception:
+                pass
 
     @staticmethod
     def style_params(media):

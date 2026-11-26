@@ -153,18 +153,18 @@ sub draw(text as string)
     boxed = m.style.bg > 0
     pad = 10
     for each line in lines
-        main = makeLabel(line, px, "0xFFFFFFFF")
-        r = main.boundingRect()
+        lbl = makeLabel(line, px, "0xFFFFFFFF")
+        r = lbl.boundingRect()
         x = Int((1920 - r.width) / 2)
         ty = y + Int((lineH - r.height) / 2)
         if boxed
-            box = CreateObject("roSGNode", "Rectangle")
-            box.color = "0x000000FF"
-            box.opacity = m.style.bg / 100
-            box.width = r.width + pad * 2
-            box.height = lineH
-            box.translation = [x - pad, y]
-            m.subs.appendChild(box)
+            rect = CreateObject("roSGNode", "Rectangle")
+            rect.color = "0x000000FF"
+            rect.opacity = m.style.bg / 100
+            rect.width = r.width + pad * 2
+            rect.height = lineH
+            rect.translation = [x - pad, y]
+            m.subs.appendChild(rect)
         else
             ' black outline + soft shadow, like the burned-in style
             for each o in [[-4, -4], [4, -4], [-4, 4], [4, 4], [0, -5], [0, 5], [-5, 0], [5, 0], [3, 6]]
@@ -173,8 +173,8 @@ sub draw(text as string)
                 m.subs.appendChild(sh)
             end for
         end if
-        main.translation = [x, ty]
-        m.subs.appendChild(main)
+        lbl.translation = [x, ty]
+        m.subs.appendChild(lbl)
         y = y + lineH
     end for
 end sub

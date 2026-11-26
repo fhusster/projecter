@@ -164,6 +164,20 @@ Popup settings: *Start where I am* · *Pause the video here* · *Show “Project
 
 ![Subtitle settings in the web app](docs/screenshots/web-app-subtitles.png)
 
+### Instant subtitle changes on Roku (Projecter channel)
+
+Normally subtitles are drawn into the picture, so each change restarts the video on the TV.
+On a Roku you can install Projecter's own channel (the `roku/` folder) instead: the Roku then
+draws the subtitles itself, and track, size, background, position and timing change instantly
+while the video keeps playing.
+
+1. Turn on Roku Developer Mode: from the home screen press **Home ×3, Up ×2, Right, Left, Right,
+   Left, Right** quickly, choose **Enable installer and restart**, and pick a password.
+2. Run `python install_roku_channel.py <roku-ip> <password>` (remembered in `config.json`;
+   after changing the channel just run `python install_roku_channel.py`).
+
+Projecter uses the channel automatically once it's installed.
+
 Open the **Subtitles** bar under the controls (web app, popup, or remote window):
 
 - **Tracks** — *Off*, the subtitles found on the page, and any you've added.
