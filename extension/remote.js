@@ -185,7 +185,7 @@ function mountRemote(root, opts = {}) {
 
   // ---------------------------------------------------------------- subtitles panel
   const SUB_DEFAULT = {size: 20, bg: 0, pos: 6, delay: 0};
-  let subStyle = Object.assign({}, SUB_DEFAULT), lastNotice = '', styleTimer = null, styleTouched = 0;
+  let subStyle = Object.assign({}, SUB_DEFAULT), lastNotice = '', styleTimer = null, styleTouched = 0, liveTimer = null, liveSent = 0;
   chrome.storage.sync.get('subStyle').then(s => { subStyle = Object.assign({}, SUB_DEFAULT, s.subStyle || {}); syncSliders(); });
 
   function renderSubs() {
@@ -233,10 +233,20 @@ function mountRemote(root, opts = {}) {
     if (player && player.thumb) q('.rm-prev-img').style.backgroundImage = `url("${player.thumb}")`;
   }
   root.querySelectorAll('.rm-sl input').forEach(i => {
-    i.addEventListener('input', () => { subStyle[i.dataset.k] = parseFloat(i.value); styleTouched = Date.now(); preview(); });
+    i.addEventListener('input', () => {
+      subStyle[i.dataset.k] = parseFloat(i.value); styleTouched = Date.now(); preview();
+      // Projecter's Roku channel draws subtitles itself: send while dragging (~8 updates a second)
+      if (player && player.live_subs) {
+        clearTimeout(liveTimer);
+        const wait = Math.max(0, 120 - (Date.now() - liveSent));
+        liveTimer = setTimeout(() => { liveSent = Date.now(); control('subs_style', Object.assign({}, subStyle)); }, wait);
+      }
+    });
     i.addEventListener('change', () => {
       chrome.storage.sync.set({subStyle});
-      clearTimeout(styleTimer);   // several quick adjustments = one reload on the TV
+      clearTimeout(styleTimer);
+      if (player && player.live_subs) return;   // already sent while dragging
+      // burned-in subtitles: several quick adjustments = one reload on the TV
       styleTimer = setTimeout(() => control('subs_style', subStyle), 700);
     });
   });

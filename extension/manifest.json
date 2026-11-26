@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Projecter",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Send the video on any web page to your TVs (Sanyo, Roku) through Projecter.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxP8/N7MKXrNXh50RUtDr/Lc33VDKM4hCQPogcd03ac97qWQxue4H09MFUGkphgZ4pc1rbgMvMWNc+FdMz4p2PbgBRn3mJPKb2uN4YHnaUdjGyaiuacUEZqw5fCxzd5EQrhySsOQfZ2EufTTijl9VFh8uCLp6zAuPczb57ywIqZs/r/Nc1mxnixQmvAAoLJlxaBI25eFEh5r7M+6zqtNa8Mzly1mv4lsJEEw6IwI9oxiPWboemrpBaEx0OLvwkpB4B9gdbrh0Wswj+fDrr6vGOzYd8oNLsNFzvu7Ubr2bHEBzeMOc65VbwH7qSX5vgl+W+iZXUk2zrdWJ+pCxd5ONvwIDAQAB",
   "icons": {

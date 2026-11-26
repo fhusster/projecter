@@ -905,6 +905,7 @@ class Device:
               "subtitles": [s.get("label") or s.get("lang") or f"Track {i + 1}" for i, s in enumerate(m.get("subtitles") or [])],
               "sub": m.get("sub", -1) if (self.session and self.session.sub_file) or self.mode == "channel" else -1,
               "subs_ok": self.mode in ("file", "hls", "channel") and not m["is_live"],
+              "live_subs": self.mode == "channel",   # subtitle changes apply instantly (no restart)
               "sub_style": dict(SUB_STYLE, **(m.get("sub_style") or {}))}
         if self.session and self.session.sub_error:
             st["notice"] = self.session.sub_error
