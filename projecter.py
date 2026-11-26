@@ -46,6 +46,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 MEDIA_ASSISTANT = "782875"   # free Roku channel that plays a URL sent over the network
 ROKU_YOUTUBE = "837"
+ROKU_CHANNEL = "dev"         # Projecter's own channel (roku/), sideloaded: draws subtitles live
 CHUNK = 4 * 1024 * 1024      # YouTube throttles long single requests; fetch in chunks instead
 SIZE_RATIO = 1.07            # MPEG-TS overhead vs. the source files (refined in testing)
 NULL_PACKET = b"\x47\x1f\xff\x10" + b"\xff" * 184
@@ -765,6 +766,32 @@ def fetch_subtitle(sub, folder):
     return name
 
 
+CUE_CACHE = {}
+TAG_RE = re.compile(r"<[^>]+>|\{\\[^}]*\}")
+
+
+def load_cues(sub):
+    """A subtitle track as a sorted list of [start, end, text] (for the Roku channel)."""
+    ident = sub.get("url") or hashlib.md5((sub.get("text") or "").encode()).hexdigest()
+    if ident in CUE_CACHE:
+        return CUE_CACHE[ident]
+    folder = os.path.join(WORK, "subs", hashlib.md5(ident.encode()).hexdigest()[:10])
+    os.makedirs(folder, exist_ok=True)
+    raw = fetch_subtitle(sub, folder)
+    if raw.endswith(".ass"):
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", raw, "conv.srt"],
+                       cwd=folder, capture_output=True, timeout=30, creationflags=NO_WINDOW, check=True)
+        raw = "conv.srt"
+    with open(os.path.join(folder, raw), encoding="utf-8", errors="replace") as f:
+        cues = parse_cues(f.read())
+    cues = sorted([round(a, 3), round(b, 3), TAG_RE.sub("", text).strip()] for a, b, text in cues)
+    cues = [c for c in cues if c[2]]
+    if not cues:
+        raise RuntimeError("no subtitle lines found in it")
+    CUE_CACHE[ident] = cues
+    return cues
+
+
 def get_session(media, start=0.0):
     """Find or start the session for this video. Plain copies always start at 0 (they finish in
     seconds). Re-encoded ones (subtitles) start where you're watching, so there's no wait."""
@@ -1188,6 +1215,7 @@ class RokuDevice(Device):
         self.power = "PowerOn"
         self.ecp = "enabled"
         self.apps = set()
+        self.app_names = {}
         self.info_time = 0
         self.cast_time = 0
 
@@ -1213,6 +1241,7 @@ class RokuDevice(Device):
             try:
                 apps = ET.fromstring(http_get(self.base + "/query/apps", timeout=4))
                 self.apps = {a.get("id") for a in apps.iter("app")}
+                self.app_names = {a.get("id"): (a.text or "").strip() for a in apps.iter("app")}
             except Exception:
                 pass
         self.info_time = time.time()
@@ -1233,9 +1262,15 @@ class RokuDevice(Device):
     def youtube_app(self):
         return bool(CONFIG["youtube_app"].get(self.id))
 
+    @property
+    def has_channel(self):
+        """Projecter's own channel is installed (see install_roku_channel.py)."""
+        return self.app_names.get(ROKU_CHANNEL) == "Projecter"
+
     def info(self):
         d = super().info()
         d["youtube_app"] = self.youtube_app
+        d["live_subs"] = self.mode == "channel"
         return d
 
     def key(self, k):
@@ -1261,6 +1296,8 @@ class RokuDevice(Device):
             self.set_playing(media, None, "youtube", 0.0)
             self.cast_time = time.time()
             return
+        if self.has_channel:
+            return self.cast_channel(media, start)
         if self.apps and MEDIA_ASSISTANT not in self.apps:
             raise RuntimeError(ROKU_NO_MA)
         s = get_session(media, start)
@@ -1277,6 +1314,61 @@ class RokuDevice(Device):
         self.ecp_call(f"/launch/{MEDIA_ASSISTANT}?{q}")
         self.set_playing(media, s, "hls", s.segs[k][0])
         self.cast_time = time.time()
+
+    def cast_channel(self, media, start):
+        """Play in Projecter's channel. Subtitles aren't burned into the picture: the channel
+        draws them, so changing them later is instant."""
+        if sub_on(media):
+            load_cues(media["subtitles"][media["sub"]])   # fail here (with a message), not on the TV
+        s = get_session(dict(media, sub=-1), start)
+        s.start()
+        if media["is_live"]:
+            s.wait_segments(3)
+            k = max(0, len(s.segs) - 3)
+        else:
+            k = s.seg_index(max(start, s.base))
+        s.wait_segments(k + 3)
+        url = f"http://{self.host()}:{PORT}/hls/{s.id}/{uuid.uuid4().hex[:6]}.m3u8?from={k}"
+        p = {"u": url, "t": media["title"][:100], "o": f"{s.segs[k][0]:.3f}",
+             "c": f"http://{self.host()}:{PORT}/roku/{urllib.parse.quote(self.id)}"}
+        p.update(self.style_params(media))
+        self.set_playing(media, s, "channel", s.segs[k][0])
+        self.ecp_call(f"/launch/{ROKU_CHANNEL}?{urllib.parse.urlencode(p)}")
+        self.cast_time = time.time()
+
+    @staticmethod
+    def style_params(media):
+        st = dict(SUB_STYLE, **(media.get("sub_style") or {}))
+        return {k: f"{float(st[k]):g}" for k in ("size", "bg", "pos", "delay")}
+
+    def cues(self):
+        m = self.media
+        if not m or not sub_on(m):
+            return []
+        return load_cues(m["subtitles"][m["sub"]])
+
+    def switch_subtitles(self, index, extra=None, style=None):
+        if self.mode != "channel":
+            return super().switch_subtitles(index, extra, style)
+        m = dict(self.media)
+        if style:
+            m["sub_style"] = style
+        subs = list(m.get("subtitles") or [])
+        if extra:
+            subs.append({"label": (extra.get("label") or "My subtitles")[:60], "text": extra.get("text") or ""})
+            index = len(subs) - 1
+        if index >= len(subs):
+            raise RuntimeError("That subtitle track is gone.")
+        track_changed = index != m.get("sub") or bool(extra)
+        m["subtitles"], m["sub"] = subs, index
+        if index >= 0:
+            load_cues(subs[index])
+        self.media = m
+        if style:
+            q = dict(self.style_params(m), op="style")
+            self.ecp_call(f"/input?{urllib.parse.urlencode(q)}")
+        if track_changed:
+            self.ecp_call("/input?op=cues")
 
     def player_xml(self):
         return ET.fromstring(self.ecp_call("/query/media-player", method="GET", timeout=3))
@@ -1321,14 +1413,14 @@ class RokuDevice(Device):
         pid = plugin.get("id") if plugin is not None else None
         pos = int(re.sub(r"\D", "", x.findtext("position") or "0") or 0) / 1000
         recent = time.time() - self.cast_time < 25   # Roku's YouTube app is slow to start
-        ours = MEDIA_ASSISTANT if self.mode == "hls" else ROKU_YOUTUBE
+        ours = {"hls": MEDIA_ASSISTANT, "channel": ROKU_CHANNEL}.get(self.mode, ROKU_YOUTUBE)
         if self.mode == "youtube" and recent and state in ("close", "stop"):
             return {"position": 0, "state": "loading", "remote": True, "can_seek": False}
         if pid and pid != ours and not recent:
             self.clear()
             return {"state": "stopped", "position": 0}
         out = {"position": self.offset + pos, "volume": None, "muted": None, "remote": True,
-               "can_seek": self.mode == "hls" and not (self.media or {}).get("is_live")}
+               "can_seek": self.mode in ("hls", "channel") and not (self.media or {}).get("is_live")}
         out["state"] = {"play": "playing", "pause": "paused", "buffer": "loading",
                         "startup": "loading"}.get(state, "loading" if recent else "stopped")
         if out["state"] == "stopped" and not recent:
@@ -1664,7 +1756,7 @@ def control(dev, action, value):
             dev.switch_subtitles(-1, extra=value)
         else:
             style = dict(SUB_STYLE, **{k: float(v) for k, v in (value or {}).items() if k in SUB_STYLE})
-            if sub_on(dev.media):
+            if sub_on(dev.media) or dev.mode == "channel":
                 dev.switch_subtitles(dev.media["sub"], style=style)
             else:   # remember it for when subtitles are turned on (a copy: sessions share dicts)
                 dev.media = dict(dev.media, sub_style=style)
@@ -1747,6 +1839,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 if not head:
                     self.wfile.write(data)
+            elif parts[0] == "roku" and len(parts) == 3 and parts[2] == "cues":
+                dev = DEVICES.get(urllib.parse.unquote(parts[1]))
+                self.send_json({"cues": dev.cues() if dev and dev.kind == "roku" else []})
             elif u.path == "/api/version":
                 self.send_json({"version": VERSION})
             elif u.path == "/api/state":
@@ -2441,7 +2536,7 @@ function render() {
 
 // ---------------------------------------------------------------- subtitles
 const SUB_DEFAULT = {size: 20, bg: 0, pos: 6, delay: 0};
-let subStyle = {...SUB_DEFAULT}, styleTimer = null, styleTouched = 0, lastNotice = '';
+let subStyle = {...SUB_DEFAULT}, styleTimer = null, styleTouched = 0, lastNotice = '', liveTimer = null, liveSent = 0;
 
 function renderSubs(p) {
   const ok = p && p.subs_ok && !p.busy, list = (p && p.subtitles) || [], bar = $('#subbar');
@@ -2482,10 +2577,22 @@ function preview() {
   const p = P(); if (p && p.thumb) $('#previmg').style.backgroundImage = `url("${p.thumb}")`;
 }
 document.querySelectorAll('.sl input').forEach(i => {
-  i.addEventListener('input', () => { subStyle[i.dataset.k] = parseFloat(i.value); styleTouched = Date.now(); preview(); });
+  i.addEventListener('input', () => {
+    subStyle[i.dataset.k] = parseFloat(i.value); styleTouched = Date.now(); preview();
+    // Projecter's Roku channel draws subtitles itself: send while dragging (~8 updates a second)
+    const d = dev();
+    if (d && d.live_subs) {
+      clearTimeout(liveTimer);
+      const wait = Math.max(0, 120 - (Date.now() - liveSent));
+      liveTimer = setTimeout(() => { liveSent = Date.now(); control('subs_style', {...subStyle}); }, wait);
+    }
+  });
   i.addEventListener('change', () => {
     styleTouched = Date.now();
-    clearTimeout(styleTimer);   // several quick adjustments = one reload on the TV
+    clearTimeout(styleTimer);
+    const d = dev();
+    if (d && d.live_subs) return;   // already sent while dragging
+    // burned-in subtitles: several quick adjustments = one reload on the TV
     styleTimer = setTimeout(() => control('subs_style', subStyle), 700);
   });
 });

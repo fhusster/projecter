@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+  <interface>
+    <field id="launch" type="assocarray" onChange="onLaunch" />
+    <field id="input" type="assocarray" alwaysNotify="true" onChange="onInput" />
+  </interface>
+  <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+  <children>
+    <Rectangle id="bgfill" width="1920" height="1080" color="0x000000FF" />
+    <Video id="video" width="1920" height="1080" translation="[0,0]" />
+    <Group id="subs" />
+    <Label id="hint" width="1920" height="1080" horizAlign="center" vertAlign="center"
+           color="0x9A9AB0FF" text="Cast something from Projecter on your laptop." />
+  </children>
+</component>
