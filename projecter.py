@@ -423,11 +423,11 @@ class Session:
             # Draw the subtitles into the picture. 720p keeps encoding ~5x faster than playback.
             style = sub_force_style(dict(SUB_STYLE, **(self.media.get("sub_style") or {})))
             self.vbitrate = 3500
-            cmd += ["-vf", f"scale=-2:'min(720,ih)',subtitles={self.sub_file}:force_style='{style}'"]
+            cmd += ["-vf", f"scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,subtitles={self.sub_file}:force_style='{style}'"]
         elif not video_ok(srcs[0]):
             # TVs (Rokus especially) only decode 8-bit H.264 up to level 4.2
             self.vbitrate = 5000
-            cmd += ["-vf", "scale=-2:'min(1080,ih)'"]
+            cmd += ["-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2"]
         if self.vbitrate:
             b = self.vbitrate
             cmd += ["-c:v", "libx264", "-preset", "veryfast", "-b:v", f"{b}k", "-maxrate", f"{b}k",
@@ -620,7 +620,7 @@ def probe_sources(media):
         hdr = "".join(f"{k}: {v}\r\n" for k, v in s["headers"].items())
         if hdr:
             cmd += ["-headers", hdr]
-        cmd += ["-show_entries", "stream=codec_type,codec_name,profile,level,pix_fmt",
+        cmd += ["-show_entries", "stream=codec_type,codec_name,profile,level,pix_fmt,width,height",
                 "-of", "json", s["url"]]
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=25, creationflags=NO_WINDOW)
@@ -635,6 +635,7 @@ def probe_sources(media):
             s["vprofile"] = v.get("profile") or ""
             s["vlevel"] = v.get("level") or 0
             s["pix_fmt"] = v.get("pix_fmt") or ""
+            s["width"], s["height"] = v.get("width") or 0, v.get("height") or 0
         if a:
             s["acodec"] = a.get("codec_name") or s.get("acodec") or ""
         elif s.get("vcodec") != "none" and len(media["sources"]) == 1 and streams:
@@ -655,6 +656,8 @@ def video_ok(src):
     if re.search(r"10|422|444", src.get("vprofile") or ""):
         return False
     try:
+        if (src.get("width") or 0) > 1920 or (src.get("height") or 0) > 1080:
+            return False   # e.g. 2600x1080 wide-screen encodes: Rokus show black
         return int(src.get("vlevel") or 0) <= 42
     except (TypeError, ValueError):
         return True
