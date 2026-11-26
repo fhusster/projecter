@@ -44,6 +44,19 @@ def running():
         return False
 
 
+def stale():
+    """True if the Projecter that's running is older than projecter.py on disk."""
+    import hashlib
+    import urllib.request
+    try:
+        with open(APP, "rb") as f:
+            mine = hashlib.sha1(f.read()).hexdigest()[:12]
+        with urllib.request.urlopen("http://127.0.0.1:8765/api/version", timeout=3) as r:
+            return json.loads(r.read()).get("version") != mine
+    except Exception:
+        return True   # too old to even have /api/version
+
+
 def start():
     pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
     if not os.path.exists(pythonw):
@@ -67,10 +80,10 @@ def start():
 def main():
     msg = read_message() or {}
     if msg.get("cmd") == "start":
-        if not running():
-            start()
-            for _ in range(40):
-                if running():
+        if not running() or stale():
+            start()   # a fresh copy replaces an outdated one by itself
+            for _ in range(60):
+                if running() and not stale():
                     break
                 time.sleep(0.25)
         send({"ok": running()})

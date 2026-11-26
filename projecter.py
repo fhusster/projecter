@@ -36,6 +36,10 @@ PORT = 8765
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "config.json")
 WORK = os.path.join(tempfile.gettempdir(), "projecter")
+# Identifies this copy of the code. A Projecter already running from older code (e.g. one the
+# browser extension started in the background days ago) is replaced instead of reused.
+with open(os.path.abspath(__file__), "rb") as _f:
+    VERSION = hashlib.sha1(_f.read()).hexdigest()[:12]
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
@@ -1743,6 +1747,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 if not head:
                     self.wfile.write(data)
+            elif u.path == "/api/version":
+                self.send_json({"version": VERSION})
             elif u.path == "/api/state":
                 self.send_json(api_state(q.get("device", [""])[0]))
             elif u.path == "/api/threads" and DEBUG:
@@ -1794,6 +1800,14 @@ class Handler(BaseHTTPRequestHandler):
         if origin and not (origin.startswith("chrome-extension://") or re.match(
                 rf"^http://(localhost|127\.0\.0\.1|\[::1\]):{PORT}$", origin)):
             return self.send_json({"error": "Not allowed"}, 403)
+        if u == "/api/quit":
+            # Only a newer copy of Projecter on this laptop may ask (never a web page).
+            if origin or self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                return self.send_json({"error": "Not allowed"}, 403)
+            self.send_json({"ok": True})
+            log("a newer Projecter is starting: quitting")
+            threading.Thread(target=quit_now, daemon=True).start()
+            return
         try:
             data = self.body()
             if u == "/api/cast":
@@ -2639,7 +2653,43 @@ document.addEventListener('keydown', e => {
 
 # ============================================================================ main
 
+def quit_now():
+    time.sleep(0.3)
+    for s in list(SESSIONS.values()):
+        s.close()
+    os._exit(0)
+
+
+def running_version():
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/api/version", timeout=3) as r:
+            return json.loads(r.read()).get("version")
+    except Exception:
+        return None
+
+
+def replace_old_copy():
+    """If an older Projecter holds the port, ask it to quit. True if the port is now free."""
+    old = running_version()
+    if not old or old == VERSION:
+        return False
+    log("an older Projecter is running: replacing it")
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/api/quit", data=b"{}",
+                                                      method="POST"), timeout=3).read()
+    except Exception:
+        pass
+    for _ in range(40):
+        time.sleep(0.25)
+        try:
+            socket.create_connection(("127.0.0.1", PORT), 0.3).close()
+        except OSError:
+            return True
+    return False
+
+
 def main():
+    replace_old_copy()
     shutil.rmtree(WORK, ignore_errors=True)
     os.makedirs(WORK, exist_ok=True)
     try:
