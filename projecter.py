@@ -417,14 +417,16 @@ class Session:
             cmd += ["-map", "0:v:0", "-map", "1:a:0"]
         else:
             cmd += ["-map", "0:v:0?", "-map", "0:a:0?"]
-        v, a = srcs[0]["vcodec"], srcs[-1]["acodec"]
+        probe_sources(self.media)
+        a = srcs[-1]["acodec"]
         if self.sub_file:
             # Draw the subtitles into the picture. 720p keeps encoding ~5x faster than playback.
             style = sub_force_style(dict(SUB_STYLE, **(self.media.get("sub_style") or {})))
             self.vbitrate = 3500
             cmd += ["-vf", f"scale=-2:'min(720,ih)',subtitles={self.sub_file}:force_style='{style}'"]
-        elif v and v != "none" and not re.match(r"(avc|h264)", v):
-            self.vbitrate = 5000   # the TVs only decode H.264
+        elif not video_ok(srcs[0]):
+            # TVs (Rokus especially) only decode 8-bit H.264 up to level 4.2
+            self.vbitrate = 5000
             cmd += ["-vf", "scale=-2:'min(1080,ih)'"]
         if self.vbitrate:
             b = self.vbitrate
@@ -433,8 +435,10 @@ class Session:
                     "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
         else:
             cmd += ["-c:v", "copy"]
-            if a and a != "none" and not re.match(r"(mp4a|aac)", a):
-                cmd += ["-c:a", "aac", "-b:a", "160k"]
+            # Rokus play only AAC inside HLS (AC-3/E-AC-3/Opus/MP3 give a silent black screen).
+            # Unknown audio is converted too: it's cheap and always safe.
+            if a != "none" and not re.match(r"(mp4a|aac)", a or ""):
+                cmd += ["-c:a", "aac", "-b:a", "160k", "-ac", "2"]
             else:
                 cmd += ["-c:a", "copy"]
         cmd += ["-f", "hls", "-hls_time", "2", "-hls_list_size", "0",
@@ -604,9 +608,63 @@ def sub_on(media):
     return i is not None and 0 <= i < len(media.get("subtitles") or []) and not media["is_live"]
 
 
+def probe_sources(media):
+    """Fill in what's actually inside each source (codec, bit depth, H.264 level). Streams found
+    by the browser extension arrive with no codec info at all; guessing 'it's fine' is what
+    gave Rokus a black screen. Results are cached on the source dicts."""
+    for s in media["sources"]:
+        if s.get("probed"):
+            continue
+        s["probed"] = True
+        cmd = ["ffprobe", "-v", "error"]
+        hdr = "".join(f"{k}: {v}\r\n" for k, v in s["headers"].items())
+        if hdr:
+            cmd += ["-headers", hdr]
+        cmd += ["-show_entries", "stream=codec_type,codec_name,profile,level,pix_fmt",
+                "-of", "json", s["url"]]
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=25, creationflags=NO_WINDOW)
+            streams = json.loads(out.stdout or "{}").get("streams") or []
+        except Exception as e:
+            log(f"probe failed: {str(e)[:80]}")
+            continue
+        v = next((x for x in streams if x.get("codec_type") == "video"), None)
+        a = next((x for x in streams if x.get("codec_type") == "audio"), None)
+        if v and s.get("vcodec") != "none":
+            s["vcodec"] = v.get("codec_name") or s.get("vcodec") or ""
+            s["vprofile"] = v.get("profile") or ""
+            s["vlevel"] = v.get("level") or 0
+            s["pix_fmt"] = v.get("pix_fmt") or ""
+        if a:
+            s["acodec"] = a.get("codec_name") or s.get("acodec") or ""
+        elif s.get("vcodec") != "none" and len(media["sources"]) == 1 and streams:
+            s["acodec"] = "none"
+        log(f"stream: video {s.get('vcodec') or '?'} {s.get('vprofile', '')} L{s.get('vlevel', '?')} "
+            f"{s.get('pix_fmt', '')}, audio {s.get('acodec') or '?'}")
+
+
+def video_ok(src):
+    """Can the TV decode this video as-is? Only plain 8-bit H.264 up to level 4.2."""
+    v = src.get("vcodec") or ""
+    if v == "none":
+        return True
+    if not re.match(r"(avc|h264)", v):
+        return False
+    if src.get("pix_fmt") and src["pix_fmt"] not in ("yuv420p", "yuvj420p"):
+        return False   # 10-bit or 4:2:2/4:4:4
+    if re.search(r"10|422|444", src.get("vprofile") or ""):
+        return False
+    try:
+        return int(src.get("vlevel") or 0) <= 42
+    except (TypeError, ValueError):
+        return True
+
+
 def needs_transcode(media):
-    v = media["sources"][0]["vcodec"]
-    return sub_on(media) or bool(v and v != "none" and not re.match(r"(avc|h264)", v))
+    if sub_on(media):
+        return True
+    probe_sources(media)
+    return not video_ok(media["sources"][0])
 
 
 def session_key(media):
