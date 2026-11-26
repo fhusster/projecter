@@ -171,12 +171,9 @@ On a Roku you can install Projecter's own channel (the `roku/` folder) instead: 
 draws the subtitles itself, and track, size, background, position and timing change instantly
 while the video keeps playing.
 
-1. Turn on Roku Developer Mode: from the home screen press **Home ×3, Up ×2, Right, Left, Right,
-   Left, Right** quickly, choose **Enable installer and restart**, and pick a password.
-2. Run `python install_roku_channel.py <roku-ip> <password>` (remembered in `config.json`;
-   after changing the channel just run `python install_roku_channel.py`).
-
-Projecter uses the channel automatically once it's installed.
+Setup takes a few minutes (Roku Developer Mode + one command). See
+**[ROKU_SETUP.md](ROKU_SETUP.md)** for step-by-step instructions. Projecter uses the channel
+automatically once it's installed.
 
 Open the **Subtitles** bar under the controls (web app, popup, or remote window):
 
@@ -203,6 +200,8 @@ Nothing to set up — the TV just needs to be on and on the same network. Projec
 2. **Add the free *Media Assistant* channel:** *Home → Streaming Store → search “Media Assistant” → Add channel.* Roku removed its built-in “play this URL” feature for outside apps; Media Assistant is the standard replacement.
 
 Projecter shows a reminder on the Roku's card if either of these is missing.
+
+For **instant subtitle changes**, install Projecter's own Roku channel instead of (or alongside) Media Assistant: see **[ROKU_SETUP.md](ROKU_SETUP.md)**.
 
 ---
 
@@ -232,6 +231,8 @@ projecter/
 ├── Projecter.bat           # double-click launcher (Windows)
 ├── requirements.txt
 ├── install_extension.py    # registers the extension's background launcher
+├── install_roku_channel.py # installs Projecter's Roku channel (see ROKU_SETUP.md)
+├── ROKU_SETUP.md           # Roku setup guide
 ├── native/
 │   ├── projecter_host.py   # native-messaging helper that starts Projecter
 │   └── extension_id.txt    # the extension's fixed ID (from the public key in manifest.json)
@@ -242,6 +243,10 @@ projecter/
 │   ├── popup.html/.js/.css # toolbar popup
 │   ├── remote.html/.js/.css, remote-window.js   # shared remote + pop-out window
 │   └── icons/
+├── roku/                   # Projecter's Roku channel (draws subtitles live)
+│   ├── manifest
+│   ├── source/main.brs
+│   └── components/         # MainScene (video + subtitles), CuesTask
 └── docs/screenshots/
 ```
 
